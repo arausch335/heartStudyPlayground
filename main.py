@@ -1,10 +1,18 @@
-from spatial_registration.main import main
+from registration.scene import Scene
+from environment import Environment
 
-main(target_path="/Users/Alexander/PycharmProjects/heartStudyPlayground/data/target.ply",
-     source_path="/Users/Alexander/PycharmProjects/heartStudyPlayground/data/source.ply",
-     distance_threshold=1e-2,
-     icp_iterations=60,
-     correspondence_threshold=0.05,
-     normal_neighbors=30,
-     output_dir="data/outputs"
-     )
+env = Environment()
+scene = Scene(env)
+env.set_scene(scene)
+
+scene.load_io_data()
+scene.segment_io_frames()
+scene.define_or_from_target()
+scene.register_io_frames()
+scene.io_frames[0].visualize(retractor=False)
+scene.io_frames[1].visualize(retractor=True)
+
+# scene.load_po_data(env.DICOM_DATA_PATH, load_view="LAX", replace=True)
+# scene.po_series[0].summary()
+# scene.po_series[0].visualize()
+# scene.po_frames[11].visualize()
