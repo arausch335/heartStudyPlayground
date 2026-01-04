@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Data
+data/
+data_storage/
+*.dcm
+*.nii
+*.nii.gz
+*.nrrd
+*.ply
+
+# OS
+.DS_Store
