@@ -2,7 +2,7 @@ import numpy as np
 
 from registration.spatial.icp.icp import point_to_plane_icp
 from registration.spatial.transforms.transforms import MatrixStep
-from registration.spatial.utilities.visualization import plot_two_registered_retractors
+from registration.spatial.utilities.visualization import plot_registered_frames
 
 
 class FrameRegistrar:
@@ -117,6 +117,15 @@ class FrameRegistrar:
         return pts_registered[idx_registered]
 
     ### --- PUBLIC API --- ###
+    def visualize_registered_frames(self, *, sample=1, stage="registered", use_retractor=True):
+        plot_registered_frames(
+            self.frames,
+            sample=sample,
+            stage=stage,
+            use_retractor=use_retractor,
+            title="Registered Frames",
+        )
+
     def register_all(self):
         """
         Register all frames (except target) into OR space via ICP.
@@ -201,6 +210,6 @@ class FrameRegistrar:
             frame.validate_points_consistency(strict=False)
 
         if self.visualize and len(self.frames) >= 2:
-            plot_two_registered_retractors(self.frames[0], self.frames[1])
+            self.visualize_registered_frames(sample=1, stage="registered", use_retractor=True)
 
         return self

@@ -6,7 +6,7 @@ scene = Scene(env)
 env.set_scene(scene)
 
 scene.load_io_data()
-scene.io_frames[0].visualize(stage='processed')
+# scene.io_frames[0].visualize(stage='processed')
 scene.segment_io_frames()
 scene.define_or_from_target()
 scene.register_io_frames()

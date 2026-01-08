@@ -3,7 +3,7 @@ from registration.spatial.segmentation.epicardium import *
 from registration.spatial.segmentation.heart import *
 from registration.spatial.transforms.annotation import *
 from registration.spatial.utilities.utilities import *
-import plotly.graph_objects as go
+from registration.spatial.utilities.visualization import plot_surface_with_subsets
 
 
 class Segment(object):
@@ -137,13 +137,10 @@ class Retractor(Segment):
 
     def visualize(self, stage="registered"):
         pts = self.get_points(stage=stage)
-        x_mesh, y_mesh, z_mesh, v_mesh = convert_point_to_meshgrid(pts)
-
-        fig = go.Figure(data=[go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, opacity=0.5)])
-        fig.update_layout(title=dict(text=f"Retractor - {stage} points"))
-        fig.update_traces(contours_z=dict(show=True, usecolormap=True,
-                                          highlightcolor="limegreen", project_z=True))
-
+        fig = plot_surface_with_subsets(
+            pts,
+            title=f"Retractor - {stage} points",
+        )
         fig.show()
 
 

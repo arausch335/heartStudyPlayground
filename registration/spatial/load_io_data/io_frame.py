@@ -1,13 +1,11 @@
 import numpy as np
-import plotly.graph_objects as go
 
 from registration.spatial.frame import Frame
 from registration.spatial.segment import Retractor
 from registration.spatial.utilities.utilities import (
     build_subset_indices_dict,
-    convert_point_to_meshgrid,
-    indices_to_subset_ids,
 )
+from registration.spatial.utilities.visualization import plot_surface_with_subsets
 
 
 class IOFrame(Frame):
@@ -96,8 +94,6 @@ class IOFrame(Frame):
         self.validate_points_consistency(strict=False)
         pts, stage_raw_indices = self._get_stage_points_with_indices(stage)
 
-        fig = go.Figure()
-
         # --- build subset indices in the SAME index_space as `pts` ---
         def _raw_to_stage_indices(raw_idx):
             if raw_idx is None:
@@ -119,38 +115,10 @@ class IOFrame(Frame):
             retractor=retractor_idx,
             epicardium=epicardium_idx,
         )
-        subset_ids, subset_names = indices_to_subset_ids(len(pts), subset_indices_dict)
-
-        x_mesh, y_mesh, z_mesh, v_mesh = convert_point_to_meshgrid(pts, values=subset_ids)
-
-        fig.add_trace(
-            go.Surface(
-                x=x_mesh, y=y_mesh, z=z_mesh,
-                opacity=0.5,
-            )
-        )
-        fig.update_traces(
-            contours_z=dict(show=True, usecolormap=True, highlightcolor="limegreen", project_z=True)
-        )
-
-        if sum([retractor, epicardium]) > 0:
-            for sid, name in subset_names.items():
-                mask = (v_mesh == sid)
-                z_masked = np.where(mask, z_mesh, np.nan)
-
-                fig.add_trace(
-                    go.Surface(
-                        x=x_mesh,
-                        y=y_mesh,
-                        z=z_masked,
-                        opacity=0.7,
-                        showscale=False,
-                        colorscale="gray",
-                        name=name,
-                    )
-                )
-
-        fig.update_layout(
-            title=f"Frame {self.n}  ({stage})"
+        subset_indices_dict = subset_indices_dict or None
+        fig = plot_surface_with_subsets(
+            pts,
+            subset_indices=subset_indices_dict,
+            title=f"Frame {self.n}  ({stage})",
         )
         fig.show()

@@ -2,9 +2,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 import cv2
+import plotly.graph_objects as go
 from typing import List, Dict, Tuple, Optional
 
-from registration.spatial.utilities.utilities import build_plane_basis
+from registration.spatial.utilities.utilities import (
+    build_plane_basis,
+    convert_point_to_meshgrid,
+    indices_to_subset_ids,
+)
 
 
 # -----------------------------
@@ -25,6 +30,45 @@ def _new_3d_ax(figsize=(7, 7), title: str = "") -> Axes3D:
 # -----------------------------
 # 1. Raw 3D point cloud / frame
 # -----------------------------
+
+def plot_surface_with_subsets(points: np.ndarray,
+                              *,
+                              subset_indices: Optional[Dict[str, np.ndarray]] = None,
+                              title: str = "Surface") -> go.Figure:
+    """
+    Plot a surface from scattered points, optionally highlighting subset indices.
+    """
+    subset_ids = None
+    subset_names = {}
+    if subset_indices:
+        subset_ids, subset_names = indices_to_subset_ids(len(points), subset_indices)
+
+    x_mesh, y_mesh, z_mesh, v_mesh = convert_point_to_meshgrid(points, values=subset_ids)
+
+    fig = go.Figure()
+    fig.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, opacity=0.5))
+    fig.update_traces(
+        contours_z=dict(show=True, usecolormap=True, highlightcolor="limegreen", project_z=True)
+    )
+
+    if subset_names:
+        for sid, name in subset_names.items():
+            mask = (v_mesh == sid)
+            z_masked = np.where(mask, z_mesh, np.nan)
+            fig.add_trace(
+                go.Surface(
+                    x=x_mesh,
+                    y=y_mesh,
+                    z=z_masked,
+                    opacity=0.7,
+                    showscale=False,
+                    colorscale="gray",
+                    name=name,
+                )
+            )
+
+    fig.update_layout(title=title)
+    return fig
 
 def plot_point_cloud_3d(points: np.ndarray,
                         color: str = "k",
@@ -293,31 +337,58 @@ def plot_two_registered_retractors(frame_a, frame_b, sample=1):
     Show two registered point clouds in the OR coordinate system.
     Useful for debugging alignment quality.
     """
+    plot_registered_frames(
+        [frame_a, frame_b],
+        sample=sample,
+        stage="registered",
+        use_retractor=True,
+        title="Two Registered Point Clouds",
+    )
 
-    idx0 = frame_a.retractor.subset_indices
-    idx1 = frame_b.retractor.subset_indices
 
-    pts_a = frame_a.get_points("registered")
-    pts_b = frame_b.get_points("registered")
-    idx0_stage = frame_a.map_raw_indices_to_stage(idx0, "registered")
-    idx1_stage = frame_b.map_raw_indices_to_stage(idx1, "registered")
-    pts_a = pts_a[idx0_stage][::sample]
-    pts_b = pts_b[idx1_stage][::sample]
+def plot_registered_frames(frames,
+                           sample: int = 1,
+                           stage: str = "registered",
+                           use_retractor: bool = True,
+                           title: str = "Registered Frames") -> None:
+    """
+    Show multiple frames registered into a shared grid.
+    """
+    if not frames:
+        raise ValueError("frames must be a non-empty list")
 
-    fig = plt.figure(figsize=(7, 7))
-    ax = fig.add_subplot(111, projection="3d")
+    ax = _new_3d_ax(title=title)
+    colors = plt.cm.get_cmap("tab10", len(frames))
 
-    ax.scatter(pts_a[:, 0], pts_a[:, 1], pts_a[:, 2],
-               s=1.0, c="red", alpha=0.6, label=f"Frame {frame_a.n}")
+    for i, frame in enumerate(frames):
+        if use_retractor and getattr(frame, "retractor", None) is not None:
+            idx = getattr(frame.retractor, "subset_indices", None)
+            if idx is not None:
+                idx_stage = frame.map_raw_indices_to_stage(idx, stage)
+                pts = frame.get_points(stage)[idx_stage]
+            else:
+                pts = frame.get_points(stage)
+        else:
+            pts = frame.get_points(stage)
 
-    ax.scatter(pts_b[:, 0], pts_b[:, 1], pts_b[:, 2],
-               s=1.0, c="blue", alpha=0.6, label=f"Frame {frame_b.n}")
+        if pts.size == 0:
+            continue
+        pts = pts[::sample]
 
-    ax.set_title("Two Registered Point Clouds")
+        ax.scatter(
+            pts[:, 0],
+            pts[:, 1],
+            pts[:, 2],
+            s=1.0,
+            c=[colors(i)],
+            alpha=0.6,
+            label=f"Frame {getattr(frame, 'n', i)}",
+        )
+
+    ax.set_title(title)
     ax.set_xlabel("X (OR)")
     ax.set_ylabel("Y (OR)")
     ax.set_zlabel("Z (OR)")
     ax.legend()
-    ax.view_init(elev=30, azim=-60)
     plt.tight_layout()
     plt.show()
