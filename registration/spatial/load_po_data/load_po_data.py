@@ -5,7 +5,7 @@ import shutil
 
 from registration.spatial.load_po_data.converter import convert_dicom
 from registration.spatial.series import POSeries
-from registration.spatial.frame import POFrame
+from registration.spatial.load_po_data.po_frame import POFrame
 
 PathLike = Union[str, Path]
 

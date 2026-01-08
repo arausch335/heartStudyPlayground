@@ -1,4 +1,4 @@
-from registration.spatial.frame import IOFrame
+from registration.spatial.load_io_data.io_frame import IOFrame
 from registration.spatial.load_io_data.preprocessing import *
 
 import open3d as o3d

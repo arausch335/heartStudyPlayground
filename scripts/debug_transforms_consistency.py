@@ -1,7 +1,7 @@
 import numpy as np
 
 from environment import Environment
-from registration.spatial.frame import IOFrame
+from registration.spatial.load_io_data.io_frame import IOFrame
 from registration.spatial.transforms.matrix import MatrixStep
 from registration.spatial.transforms.subset import SubsetStep
 from registration.spatial.transforms.transforms import Transforms
