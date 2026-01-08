@@ -1,4 +1,4 @@
-from registration.spatial.utils.transforms_utils import (
+from registration.spatial.utilities.transforms_utils import (
     apply_T,
     assert_T_valid,
     compose_T,

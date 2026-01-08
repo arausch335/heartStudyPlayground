@@ -3,7 +3,7 @@ import numpy as np
 from registration.spatial.transforms.matrix import MatrixStep
 from registration.spatial.transforms.subset import SubsetStep
 from registration.spatial.transforms.annotation import AnnotationStep, SegmentationStep
-from registration.spatial.utils.transforms_utils import compose_T, invert_T
+from registration.spatial.utilities.transforms_utils import compose_T, invert_T
 
 
 class Transforms:

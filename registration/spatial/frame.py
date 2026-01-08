@@ -3,8 +3,8 @@ import plotly.graph_objects as go
 
 from registration.spatial.segment import Retractor
 from registration.spatial.transforms.transforms import MatrixStep
-from registration.spatial.utils.transforms_utils import apply_T
-from registration.utilities.utilities import (
+from registration.spatial.utilities.transforms_utils import apply_T
+from registration.spatial.utilities.utilities import (
     build_subset_indices_dict,
     convert_point_to_meshgrid,
     indices_to_subset_ids,

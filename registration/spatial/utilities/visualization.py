@@ -4,7 +4,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 import cv2
 from typing import List, Dict, Tuple, Optional
 
-from registration.utilities.utilities import build_plane_basis
+from registration.spatial.utilities.utilities import build_plane_basis
 
 
 # -----------------------------

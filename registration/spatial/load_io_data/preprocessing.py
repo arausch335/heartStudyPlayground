@@ -4,7 +4,7 @@ from registration.spatial.transforms.transforms import (
     SubsetStep,
     Transforms,
 )
-from registration.spatial.utils.transforms_utils import apply_T
+from registration.spatial.utilities.transforms_utils import apply_T
 
 
 class PreprocessingPipeline:

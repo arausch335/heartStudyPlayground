@@ -3,7 +3,7 @@ from typing import Tuple
 import numpy as np
 from scipy.interpolate import griddata
 
-from registration.spatial.utils.transforms_utils import apply_T
+from registration.spatial.utilities.transforms_utils import apply_T
 
 
 def normalize_vec(v: np.ndarray) -> np.ndarray:
@@ -111,5 +111,4 @@ def convert_point_to_meshgrid(points, values=None):
         v_mesh = griddata((x, y), values, (x_mesh, y_mesh), method='nearest')
 
     return x_mesh, y_mesh, z_mesh, v_mesh
-
 

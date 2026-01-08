@@ -2,7 +2,7 @@ import numpy as np
 
 from registration.spatial.icp.icp import point_to_plane_icp
 from registration.spatial.transforms.transforms import MatrixStep
-from registration.utilities.visualization import plot_two_registered_retractors
+from registration.spatial.utilities.visualization import plot_two_registered_retractors
 
 
 class FrameRegistrar:

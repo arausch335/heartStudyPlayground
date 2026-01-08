@@ -1,6 +1,6 @@
 import numpy as np
 
-from registration.utilities.utilities import (
+from registration.spatial.utilities.utilities import (
     normalize_vec,
     fit_plane_svd,
     build_plane_basis,

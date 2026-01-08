@@ -2,7 +2,7 @@ from registration.spatial.segmentation.retractor import *
 from registration.spatial.segmentation.epicardium import *
 from registration.spatial.segmentation.heart import *
 from registration.spatial.transforms.annotation import *
-from registration.utilities.utilities import *
+from registration.spatial.utilities.utilities import *
 import plotly.graph_objects as go
 
 

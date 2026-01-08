@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any
 
 import numpy as np
 
-from registration.spatial.utils.transforms_utils import apply_T, compose_T, invert_T
+from registration.spatial.utilities.transforms_utils import apply_T, compose_T, invert_T
 
 
 # ------------------------------------------------------------
