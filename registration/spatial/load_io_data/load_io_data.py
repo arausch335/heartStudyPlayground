@@ -41,8 +41,11 @@ def load_io_data(env, data_dir=None):
         frame.preprocessing_pipeline.preprocess()
 
         frame.transforms = frame.preprocessing_pipeline.transforms
-        frame.points = frame.preprocessing_pipeline.processed_points
         frame.active_indices = frame.preprocessing_pipeline.active_indices
+        frame.index_maps[("raw", "processed")] = frame.active_indices.copy()
+        frame.points = frame.preprocessing_pipeline.processed_points
+        frame.points_stage = "processed"
+        frame.validate_points_consistency(strict=True)
 
         # add frame to list and increase frame index counter
         frames.append(frame)

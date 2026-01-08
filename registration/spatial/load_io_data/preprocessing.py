@@ -1,10 +1,10 @@
 import numpy as np
 from registration.spatial.transforms.transforms import (
-    Transforms,
     MatrixStep,
     SubsetStep,
-    apply_T,
+    Transforms,
 )
+from registration.spatial.utils.transforms_utils import apply_T
 
 
 class PreprocessingPipeline:
@@ -47,7 +47,7 @@ class PreprocessingPipeline:
     def clean(self, outlier_quantile, iso_radius_frac, min_neighbors):
         """
         Removes outliers and isolated points from the active points.
-        Records a SubsetStep (preprocessing stage) with standardized metadata.
+        Records a SubsetStep (processed stage) with standardized metadata.
         """
         self._require_not_finalized()
 
@@ -110,7 +110,7 @@ class PreprocessingPipeline:
         # ---- record step (standardized metadata) ----
         step = SubsetStep(
             name="remove_outliers_and_isolated_points",
-            stage="preprocessing",
+            stage="processed",
             indices=kept_idx,
         )
         step.set_metadata(
@@ -134,7 +134,7 @@ class PreprocessingPipeline:
     def normalize(self):
         """
         Normalize the *current* active set by centering and scaling to unit-ish size.
-        Records a MatrixStep (preprocessing stage) with standardized metadata.
+        Records a MatrixStep (processed stage) with standardized metadata.
         """
         self._require_not_finalized()
 
@@ -159,12 +159,12 @@ class PreprocessingPipeline:
         T[2, 3] = -float(center[2]) * s
 
         # ---- apply now (mutate active) ----
-        self.active_points = apply_T(T, self.active_points)
+        self.active_points = apply_T(self.active_points, T)
 
         # ---- record step (standardized metadata) ----
         step = MatrixStep(
             name="normalize(center_then_scale)",
-            stage="preprocessing",
+            stage="processed",
             T=T,
         )
         step.set_metadata(
@@ -184,7 +184,13 @@ class PreprocessingPipeline:
 
     ### --- FINALIZE AND REPORT --- ###
     def finalize(self):
-        self.processed_points = self.active_points
+        collapsed = self.transforms.collapse(
+            stages=["processed"],
+            n_raw_points=len(self.raw_points),
+        )
+        raw_idx = collapsed["collapsed_indices"]
+        T = collapsed["collapsed_T"]
+        self.processed_points = apply_T(self.raw_points[raw_idx], T)
         self._finalized = True
         return self
 

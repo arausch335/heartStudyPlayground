@@ -1,6 +1,9 @@
 from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Any
+
 import numpy as np
+
+from registration.spatial.utils.transforms_utils import apply_T, compose_T, invert_T
 
 
 # ------------------------------------------------------------
@@ -162,18 +165,15 @@ class TransformChain:
         Steps without matrices (crop, etc.) are ignored in the matrix product,
         but their metadata remains available for bookkeeping.
         """
-        T = np.eye(4)
-        for step in self.steps:
-            if step.matrix is not None:
-                T = step.matrix @ T  # apply in order
-        return T
+        matrices = [step.matrix for step in self.steps if step.matrix is not None]
+        return compose_T(matrices)
 
     def inverse_composite_matrix(self) -> np.ndarray:
         """
         Inverse of the composite matrix (assuming all matrix steps are invertible).
         """
         T = self.composite_matrix()
-        return np.linalg.inv(T)
+        return invert_T(T)
 
     def apply(self, points: np.ndarray) -> np.ndarray:
         """
@@ -181,21 +181,15 @@ class TransformChain:
         Non-matrix steps are ignored here (they affect which points exist, not
         their coordinates).
         """
-        pts = np.asarray(points, dtype=float)
-        pts_h = np.c_[pts, np.ones(len(pts))]
         T = self.composite_matrix()
-        pts_out_h = (T @ pts_h.T).T
-        return pts_out_h[:, :3]
+        return apply_T(points, T)
 
     def apply_inverse(self, points: np.ndarray) -> np.ndarray:
         """
         Apply inverse of the composite transform.
         """
-        pts = np.asarray(points, dtype=float)
-        pts_h = np.c_[pts, np.ones(len(pts))]
         T_inv = self.inverse_composite_matrix()
-        pts_out_h = (T_inv @ pts_h.T).T
-        return pts_out_h[:, :3]
+        return apply_T(points, T_inv)
 
     # ------------ serialization ------------
 

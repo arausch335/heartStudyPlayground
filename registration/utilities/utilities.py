@@ -1,6 +1,9 @@
 from typing import Tuple
-from scipy.interpolate import griddata
+
 import numpy as np
+from scipy.interpolate import griddata
+
+from registration.spatial.utils.transforms_utils import apply_T
 
 
 def normalize_vec(v: np.ndarray) -> np.ndarray:
@@ -109,44 +112,4 @@ def convert_point_to_meshgrid(points, values=None):
 
     return x_mesh, y_mesh, z_mesh, v_mesh
 
-
-def apply_T(T, points):
-    """
-    Apply a 4x4 homogeneous transform to a set of 3D points.
-
-    Parameters
-    ----------
-    T : (4,4) array-like
-        Homogeneous transform matrix.
-        Convention: points are treated as column vectors [x y z 1]^T,
-        and the transform is applied as: p' = T @ p
-    points : (N,3) array-like
-        Input points.
-
-    Returns
-    -------
-    points_out : (N,3) ndarray
-        Transformed points.
-    """
-    T = np.asarray(T, dtype=float)
-    pts = np.asarray(points, dtype=float)
-
-    if T.shape != (4, 4):
-        raise ValueError(f"T must be (4,4), got {T.shape}")
-    if pts.ndim != 2 or pts.shape[1] != 3:
-        raise ValueError(f"points must be (N,3), got {pts.shape}")
-
-    if pts.shape[0] == 0:
-        # empty input, return empty output with correct shape
-        return pts.copy()
-
-    # Homogeneous coordinates
-    ones = np.ones((pts.shape[0], 1), dtype=pts.dtype)
-    pts_h = np.hstack([pts, ones])           # (N,4)
-
-    # Apply transform: (4,4) @ (4,N) -> (4,N)
-    pts_h_t = (T @ pts_h.T).T                # (N,4)
-
-    # Drop homogeneous coordinate
-    return pts_h_t[:, :3]
 

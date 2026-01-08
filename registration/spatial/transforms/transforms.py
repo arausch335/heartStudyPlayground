@@ -1,8 +1,9 @@
+import numpy as np
+
 from registration.spatial.transforms.matrix import MatrixStep
 from registration.spatial.transforms.subset import SubsetStep
 from registration.spatial.transforms.annotation import AnnotationStep, SegmentationStep
-
-import numpy as np
+from registration.spatial.utils.transforms_utils import compose_T, invert_T
 
 
 class Transforms:
@@ -103,17 +104,9 @@ class Transforms:
         """
         Property returning sum of all matrix transforms for the full Transforms chain
         """
-        # if start, end, stages not all None
-        if not [x for x in (start, end, stages) if x is None]:
-            steps = self._iter_steps(start=None, end=None, stages=None)
-        else:
-            steps = self.steps
-
-        T = np.eye(4, dtype=float)
-        for s in self.steps:
-            if getattr(s, "kind", None) == "matrix":
-                T = np.asarray(s.T, dtype=float) @ T
-        return T
+        steps = list(self._iter_steps(start=start, end=end, stages=stages))
+        matrices = [np.asarray(s.T, dtype=float) for s in steps if getattr(s, "kind", None) == "matrix"]
+        return compose_T(matrices)
 
     ### --- HELPER FUNCTIONS --- ###
     def _iter_steps(self, start=None, end=None, stages=None):
@@ -141,18 +134,27 @@ class Transforms:
         We look for the earliest subset step in the selected range that has:
           step.metadata["previous_index_count"]
 
-        This should be present for your initial preprocessing subset step.
+        This should be present for your initial processed subset step.
         """
-        steps = self._iter_steps(start=start, end=end, stages=stages)
+        steps = list(self._iter_steps(start=start, end=end, stages=stages))
         indices = [self.steps.index(step) for step in steps]
+        stage_set = set(stages) if stages is not None else None
         start, end = min(indices), max(indices)
 
         while sum([step.kind == "subset" for step in steps]) == 0:
             start -= 1
             if start < 0:
                 raise IndexError("No subset steps found in transform")
-            steps = self._iter_steps(start=start, end=end)
-            steps = [[step if (step.stage in stages or start <= self.steps.index(step) <= min(indices)) else None] for step in steps][0]
+            steps = list(self._iter_steps(start=start, end=end))
+            steps = [
+                step
+                for step in steps
+                if (
+                    stage_set is None
+                    or step.stage in stage_set
+                    or start <= self.steps.index(step) <= min(indices)
+                )
+            ]
 
         for s in steps:
             if getattr(s, "kind", None) != "subset":
@@ -167,28 +169,8 @@ class Transforms:
         raise RuntimeError(
             "Could not infer n_raw_points. Provide n_raw_points explicitly, "
             "or ensure at least one subset step in the selected range has "
-            "metadata['previous_index_count'] set (typically the first preprocessing subset)."
+            "metadata['previous_index_count'] set (typically the first processed subset)."
         )
 
 
 ### --- HELPER FUNCTIONS --- ###
-def apply_T(T, points):
-    points = np.asarray(points)
-    if points.ndim != 2 or points.shape[1] != 3:
-        raise ValueError(f"Expected (N,3) points, got {points.shape}")
-
-    T = np.asarray(T, dtype=float)
-    if T.shape != (4, 4):
-        raise ValueError(f"Expected (4,4) transform, got {T.shape}")
-
-    ones = np.ones((points.shape[0], 1), dtype=float)
-    Ph = np.concatenate([points, ones], axis=1)
-    out = (T @ Ph.T).T
-    return out[:, :3]
-
-
-def invert_T(T):
-    T = np.asarray(T, dtype=float)
-    if T.shape != (4, 4):
-        raise ValueError(f"Expected (4,4) transform, got {T.shape}")
-    return np.linalg.inv(T)

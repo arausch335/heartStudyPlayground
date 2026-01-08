@@ -22,21 +22,15 @@ class Segment(object):
         self.parent_frame = frame
         return self
 
-    def get_points(self, index_space="active", coord_space="world"):
+    def get_points(self, stage: str = "processed"):
         """
-        Return this segment's points in a requested index/coordinate space.
+        Return this segment's points for a requested stage.
 
-        Index spaces
-        ------------
-        - "raw":     subset_indices are applied directly to frame.raw_points
-        - "active":  subset_indices (raw) are mapped into the frame's active set
-                    using frame.active_indices, then applied to frame active points
-
-        Coord spaces
-        ------------
-        Delegated to frame.get_points(...):
-        - "world": active/raw points in world coordinates
-        - "or":    applies registration matrices (stage="registration") if present
+        Stages
+        ------
+        - "raw"
+        - "processed"
+        - "registered"
         """
         f = self.parent_frame
         if f is None:
@@ -46,39 +40,10 @@ class Segment(object):
         if self.subset_indices is None:
             raise RuntimeError("Segment has no subset_indices (raw)")
 
-        index_space = str(index_space).lower()
-        coord_space = str(coord_space).lower()
-
         raw_idx = np.asarray(self.subset_indices, dtype=int).reshape(-1)
-
-        # --- RAW index space: trivial ---
-        if index_space == "raw":
-            raw_pts = f.get_points(index_space="raw", coord_space=coord_space)
-            return raw_pts[raw_idx]
-
-        # --- ACTIVE index space: map raw subset -> active subset indices ---
-        if index_space == "active":
-            if getattr(f, "active_indices", None) is None:
-                raise RuntimeError(
-                    f"Frame {getattr(f, 'n', '?')}: active_indices not set; cannot map raw->active."
-                )
-
-            active_raw = np.asarray(f.active_indices, dtype=int).reshape(-1)
-
-            # Build raw->active lookup (raw index -> position in active array)
-            lut = {int(r): i for i, r in enumerate(active_raw)}
-
-            # Keep only those raw indices that are still present in the active set
-            active_subset_idx = np.asarray(
-                [lut.get(int(r), -1) for r in raw_idx], dtype=int
-            )
-            active_subset_idx = active_subset_idx[active_subset_idx >= 0]
-
-            active_pts = f.get_points(index_space="active", coord_space=coord_space)
-            return active_pts[active_subset_idx]
-
-        raise ValueError(f"Unknown index_space '{index_space}'. Expected 'raw' or 'active'.")
-
+        stage_points, stage_raw_indices = f._get_stage_points_with_indices(stage)
+        stage_idx = f._map_raw_to_stage_indices(raw_idx, stage_raw_indices)
+        return stage_points[stage_idx]
 
 
 class Retractor(Segment):
@@ -110,7 +75,7 @@ class Retractor(Segment):
             raise RuntimeError("Frame.active_indices is None (needed for active->raw mapping)")
 
         # --- segment on ACTIVE points ---
-        active_pts = f.get_points(index_space="active", coord_space="world")
+        active_pts = f.get_active_points(stage="processed")
         active_to_raw = np.asarray(f.active_indices, dtype=int).reshape(-1)
         previous_index_count = int(active_to_raw.size)
 
@@ -154,7 +119,7 @@ class Retractor(Segment):
         )
 
         step.set_metadata(
-            source_space="active",
+            source_space="processed",
             raw_indices_count=int(raw_idx.size),
             active_indices_at_time=active_to_raw,     # raw mapping snapshot
             previous_index_count=previous_index_count,
@@ -170,18 +135,12 @@ class Retractor(Segment):
 
         return self
 
-    def visualize(self):
-        try:
-            pts = self.registered_points
-            pts_type = 'Registered'
-        except AttributeError:
-            pts = self.original_points
-            pts_type = 'Original'
-
+    def visualize(self, stage="registered"):
+        pts = self.get_points(stage=stage)
         x_mesh, y_mesh, z_mesh, v_mesh = convert_point_to_meshgrid(pts)
 
         fig = go.Figure(data=[go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, opacity=0.5)])
-        fig.update_layout(title=dict(text=f'Frame {self.frame_n} Retractor - {pts_type} Points'))
+        fig.update_layout(title=dict(text=f"Retractor - {stage} points"))
         fig.update_traces(contours_z=dict(show=True, usecolormap=True,
                                           highlightcolor="limegreen", project_z=True))
 
@@ -222,4 +181,3 @@ class Heart(Segment):
 
         self.subset_indices = result["indices"]
         self.metrics = result.get("metrics", {})
-

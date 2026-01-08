@@ -9,9 +9,9 @@ class Scene:
 
     Key idea (no ORCoordinateGrid):
     ------------------------------
-    - OR space is defined implicitly as the output of stage="registration".
-    - The target frame defines OR when we add its first MatrixStep(stage="registration").
-    - Other frames add their own registration MatrixStep (e.g., ICP result).
+        - OR space is defined implicitly as the output of stage="registered".
+        - The target frame defines OR when we add its first MatrixStep(stage="registered").
+        - Other frames add their own registered-stage MatrixStep (e.g., ICP result).
     """
 
     def __init__(self, env):
@@ -32,7 +32,7 @@ class Scene:
         Expected result:
           - frames have raw_points
           - preprocessing already ran (or was run during load):
-              frame.points, frame.active_indices, frame.transforms (stage='preprocessing')
+              frame.points, frame.active_indices, frame.transforms (stage='processed')
         """
         data_dir = data_dir if data_dir is not None else self.env.IO_DATA_PATH
         self.io_frames = load_io_data(self.env, data_dir)
@@ -89,7 +89,7 @@ class Scene:
     def define_or_from_target(self):
         """
         Define OR space by aligning the target frame to its retractor plane and
-        recording that alignment as the first registration-stage MatrixStep.
+        recording that alignment as the first registered-stage MatrixStep.
 
         Important:
         - This is NOT segmentation.
@@ -104,10 +104,9 @@ class Scene:
             raise RuntimeError("Target frame retractor not segmented.")
 
         # align_to_retractor_plane should:
-        #  - compute T (world->OR) from retractor info
-        #  - apply it to frame.points (active)
-        #  - add MatrixStep(stage='registration') to frame.transforms
-        self.target_frame.align_to_retractor_plane(stage="registration")
+        #  - compute T (processed->registered) from retractor info
+        #  - add MatrixStep(stage='registered') to frame.transforms
+        self.target_frame.align_to_retractor_plane(stage="registered")
 
         return self
 

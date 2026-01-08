@@ -1,9 +1,14 @@
-from registration.spatial.segment import Retractor
-from registration.spatial.transforms.transforms import MatrixStep
-from registration.utilities.utilities import *
 import numpy as np
 import plotly.graph_objects as go
-import napari
+
+from registration.spatial.segment import Retractor
+from registration.spatial.transforms.transforms import MatrixStep
+from registration.spatial.utils.transforms_utils import apply_T
+from registration.utilities.utilities import (
+    build_subset_indices_dict,
+    convert_point_to_meshgrid,
+    indices_to_subset_ids,
+)
 
 
 class Frame(object):
@@ -13,7 +18,9 @@ class Frame(object):
         # points
         self.raw_points = None
         self.points = None
+        self.points_stage = None
         self.active_indices = None
+        self.index_maps = {}
 
         # metadata
         self.n = None
@@ -39,139 +46,155 @@ class Frame(object):
         self.n = n
         self.file_path = file_path
 
-    def get_points(self, index_space="active", coord_space="world", *, require_registered=True):
+    def get_points(self, stage: str = "registered") -> np.ndarray:
         """
-        Unified point accessor.
+        Unified point accessor using strict stage semantics.
 
-        Axes
-        ----
-        index_space:
-          - "raw"    : indices into raw_points (no subsetting)
-          - "active" : current active subset (uses active_indices)
-
-        coord_space:
-          - "world"  : scanner/world coordinates
-          - "or"     : OR coordinates (requires registration stage)
-          - aliases:
-              "registered" -> ("active","or")
-              "or"         -> ("active","or")
-
-        Policy / Assumptions
-        --------------------
-        - Registration stage matrices represent WORLD -> OR.
-        - self.raw_points are WORLD coordinates.
-        - self.active_indices maps active index -> raw index.
-        - self.points may be *preprocessed coordinates* (e.g., normalized), so it is NOT used
-          for world/or calculations unless you explicitly ask for it.
-
-        Parameters
-        ----------
-        require_registered : bool
-            If coord_space="or", enforce that registration exists and/or is_registered is True.
-
-        Returns
-        -------
-        (N,3) np.ndarray
+        Stages
+        ------
+        - "raw"        : raw points (immutable)
+        - "processed"  : raw -> processed transforms (subset + matrix steps)
+        - "registered" : raw -> processed -> registered transforms
         """
-        # -----------------------------
-        # Normalize inputs / aliases
-        # -----------------------------
-        if coord_space is None:
-            coord_space = "world"
+        stage = str(stage).lower()
+        if stage not in ("raw", "processed", "registered"):
+            raise ValueError(f"Unknown stage '{stage}'. Expected raw/processed/registered.")
 
-        index_space = str(index_space).lower()
-        coord_space = str(coord_space).lower()
+        raw = self._require_raw_points()
+        if stage == "raw":
+            return raw
 
-        # convenience aliases
-        if coord_space in ("registered", "reg", "or_registered"):
-            index_space = "active"
-            coord_space = "or"
+        indices, T = self._get_stage_indices_and_T(stage)
+        pts = raw[indices]
+        return apply_T(pts, T)
 
-        if index_space in ("registered", "reg"):
-            index_space = "active"
-            coord_space = "or"
+    def get_active_points(self, stage: str = "processed") -> np.ndarray:
+        if self.active_indices is None:
+            raise RuntimeError(f"Frame {self.n}: active_indices not set.")
+        active_raw = np.asarray(self.active_indices, dtype=int).reshape(-1)
+        if active_raw.size == 0:
+            return np.empty((0, 3), dtype=float)
 
-        # -----------------------------
-        # Require core data
-        # -----------------------------
+        if stage == "raw":
+            raw = self._require_raw_points()
+            return raw[active_raw]
+
+        stage_points, stage_raw_indices = self._get_stage_points_with_indices(stage)
+        active_stage_idx = self._map_raw_to_stage_indices(active_raw, stage_raw_indices)
+        return stage_points[active_stage_idx]
+
+    def _require_raw_points(self) -> np.ndarray:
         if self.raw_points is None:
             raise RuntimeError(f"Frame {self.n}: raw_points not set.")
-
         raw = np.asarray(self.raw_points)
         if raw.ndim != 2 or raw.shape[1] != 3:
             raise RuntimeError(f"Frame {self.n}: raw_points must be (N,3).")
+        return raw
 
-        # -----------------------------
-        # Build base WORLD points for requested index_space
-        # -----------------------------
-        if index_space == "raw":
-            pts_world = raw
+    def _get_stage_indices_and_T(self, stage: str):
+        raw = self._require_raw_points()
+        if self.transforms is None:
+            raise RuntimeError(f"Frame {self.n}: transforms not set.")
 
-        elif index_space == "active":
-            if self.active_indices is None:
-                raise RuntimeError(f"Frame {self.n}: active_indices not set (cannot get active points).")
+        stages = ["processed"] if stage == "processed" else ["processed", "registered"]
+        collapsed = self.transforms.collapse(
+            stages=stages,
+            n_raw_points=len(raw),
+        )
+        indices = np.asarray(collapsed["collapsed_indices"], dtype=int).reshape(-1)
+        T = np.asarray(collapsed["collapsed_T"], dtype=float)
 
-            active_idx = np.asarray(self.active_indices, dtype=int).reshape(-1)
-            if active_idx.size > 0:
-                if active_idx.min() < 0 or active_idx.max() >= len(raw):
+        if stage == "registered":
+            has_registration = any(
+                getattr(step, "kind", None) == "matrix" and getattr(step, "stage", None) == "registered"
+                for step in self.transforms.steps
+            )
+            if not has_registration:
+                raise RuntimeError(f"Frame {self.n}: no registration transforms available.")
+
+        return indices, T
+
+    def _get_stage_points_with_indices(self, stage: str):
+        raw = self._require_raw_points()
+        indices, T = self._get_stage_indices_and_T(stage)
+        pts = apply_T(raw[indices], T)
+        return pts, indices
+
+    @staticmethod
+    def _map_raw_to_stage_indices(raw_indices, stage_raw_indices):
+        stage_raw_indices = np.asarray(stage_raw_indices, dtype=int).reshape(-1)
+        lut = {int(raw_idx): i for i, raw_idx in enumerate(stage_raw_indices)}
+        mapped = np.asarray([lut.get(int(r), -1) for r in raw_indices], dtype=int)
+        mapped = mapped[mapped >= 0]
+        return mapped
+
+    def map_raw_indices_to_stage(self, raw_indices, stage: str):
+        _, stage_raw_indices = self._get_stage_points_with_indices(stage)
+        return self._map_raw_to_stage_indices(raw_indices, stage_raw_indices)
+
+    def validate_points_consistency(self, strict: bool = True, atol=1e-6, rtol=1e-6):
+        raw = self._require_raw_points()
+        raw_out = self.get_points("raw")
+        if not np.allclose(raw, raw_out, atol=atol, rtol=rtol):
+            raise RuntimeError(f"Frame {self.n}: raw points mismatch in get_points('raw').")
+
+        if self.points is not None:
+            if self.points_stage is None:
+                raise RuntimeError(f"Frame {self.n}: points_stage must be set when points cache exists.")
+            expected = self.get_points(self.points_stage)
+            if not np.allclose(self.points, expected, atol=atol, rtol=rtol):
+                raise RuntimeError(
+                    f"Frame {self.n}: cached points mismatch for stage '{self.points_stage}'."
+                )
+
+        stages = ["raw", "processed"]
+        if any(
+            getattr(step, "kind", None) == "matrix" and getattr(step, "stage", None) == "registered"
+            for step in (self.transforms.steps if self.transforms is not None else [])
+        ):
+            stages.append("registered")
+
+        for stage in stages:
+            pts_a = self.get_points(stage)
+            pts_b = self.get_points(stage)
+            if not np.allclose(pts_a, pts_b, atol=atol, rtol=rtol):
+                raise RuntimeError(f"Frame {self.n}: non-deterministic get_points('{stage}').")
+
+        if strict and self.active_indices is not None:
+            active_raw = np.asarray(self.active_indices, dtype=int).reshape(-1)
+            if active_raw.size > 0:
+                if active_raw.min() < 0 or active_raw.max() >= len(raw):
                     raise RuntimeError(
                         f"Frame {self.n}: active_indices out of range for raw_points (N={len(raw)})."
                     )
+            mapped = self.index_maps.get(("raw", "processed"))
+            if mapped is not None:
+                mapped = np.asarray(mapped, dtype=int).reshape(-1)
+                if not np.array_equal(mapped, active_raw):
+                    raise RuntimeError(
+                        f"Frame {self.n}: index_maps('raw','processed') does not match active_indices."
+                    )
 
-            # IMPORTANT: active/world is defined as "raw subset in world coords"
-            pts_world = raw[active_idx]
-
-        else:
-            raise ValueError(
-                f"Unknown index_space '{index_space}'. Expected 'raw' or 'active'."
-            )
-
-        # -----------------------------
-        # Coordinate transform
-        # -----------------------------
-        if coord_space == "world":
-            return pts_world
-
-        if coord_space == "or":
-            if require_registered and not getattr(self, "is_registered", False):
-                raise RuntimeError(f"Frame {self.n} is not registered (is_registered=False).")
-
-            if self.transforms is None:
-                raise RuntimeError(f"Frame {self.n}: transforms not set (cannot compute OR points).")
-
-            # get registration collapse only
-            if not hasattr(self.transforms, "collapse"):
-                raise RuntimeError(f"Frame {self.n}: transforms has no collapse() method.")
-
-            T_or_from_world = self.transforms.collapse(stages=["registration"])["collapsed_T"]
-            if T_or_from_world is None:
-                raise RuntimeError(f"Frame {self.n}: no registration transform found (stage='registration').")
-
-            return apply_T(T_or_from_world, pts_world)
-
-        # Optional: if you want access to the stored self.points regardless of coordinate meaning
-        if coord_space in ("active_coords", "stored"):
-            if index_space != "active":
-                raise ValueError("coord_space='active_coords' only makes sense with index_space='active'.")
-            if self.points is None:
-                raise RuntimeError(f"Frame {self.n}: points not set.")
-            return np.asarray(self.points)
-
-        raise ValueError(
-            f"Unknown coord_space '{coord_space}'. Expected 'world', 'or', or 'active_coords'."
-        )
+        return True
 
     def validate_transforms(self, atol=1e-6, rtol=1e-6, max_report=5, verbose=True):
-        collapsed_transform, collapsed_indices = self.transforms.collapsed
-        collapsed_indices = np.asarray(collapsed_indices).astype(int).reshape(-1)
+        raw = self._require_raw_points()
+        collapsed = self.transforms.collapse(
+            stages=["processed"],
+            n_raw_points=len(raw),
+        )
+        collapsed_indices = np.asarray(collapsed["collapsed_indices"]).astype(int).reshape(-1)
+        collapsed_transform = collapsed["collapsed_T"]
 
-        raw = np.asarray(self.raw_points)
-        pts = np.asarray(self.points)
+        if self.points is not None and self.points_stage == "processed":
+            pts = np.asarray(self.points)
+        else:
+            pts = self.get_points("processed")
+
         active_idx = np.asarray(self.active_indices).astype(int).reshape(-1)
-
         indices_match = np.array_equal(active_idx, collapsed_indices)
 
-        expected = apply_T(collapsed_transform, raw[collapsed_indices]) if collapsed_indices.size > 0 else raw[collapsed_indices]
+        expected = apply_T(raw[collapsed_indices], collapsed_transform) if collapsed_indices.size > 0 else raw[collapsed_indices]
 
         shape_match = expected.shape == pts.shape
         if shape_match and expected.size > 0:
@@ -237,7 +260,7 @@ class IOFrame(Frame):
         # self.epicardium = Epicardium()
         # self.epicardium.attach(self.n)
 
-    def align_to_retractor_plane(self, stage="registration"):
+    def align_to_retractor_plane(self, stage="registered"):
         """
         Define OR by aligning WORLD -> retractor-plane coordinates.
 
@@ -281,9 +304,9 @@ class IOFrame(Frame):
             stage=stage,
         )
         step.set_metadata(
-            description="Define OR from segmented retractor plane",
-            from_space="world",
-            to_space="or",
+            description="Define OR from segmented retractor plane (processed -> registered)",
+            from_space="processed",
+            to_space="registered",
             method="retractor_axes_from_segmentation",
             params={
                 "retractor_label": r.label,
@@ -295,50 +318,37 @@ class IOFrame(Frame):
 
         # Optional convenience flag only
         self.is_registered = True
+        self.validate_points_consistency(strict=False)
         return self
 
-    def visualize(self, retractor=False, epicardium=False, *, index_space="active", coord_space="or"):
+    def visualize(self, retractor=False, epicardium=False, *, stage="registered"):
         """
         Visualize the frame surface, optionally highlighting segment subsets.
 
-        - Uses your new get_points(index_space, coord_space)
-        - Segment subset_indices are RAW indices, so we must map RAW->ACTIVE index space
-          for coloring when index_space="active".
+        - Uses get_points(stage)
+        - Segment subset_indices are RAW indices and are mapped into stage index space.
         """
-        pts = self.get_points(index_space=index_space, coord_space=coord_space)
+        self.validate_points_consistency(strict=False)
+        pts, stage_raw_indices = self._get_stage_points_with_indices(stage)
 
         fig = go.Figure()
 
         # --- build subset indices in the SAME index_space as `pts` ---
-        def _raw_to_active_indices(raw_idx):
-            """Map RAW indices -> indices into the current active set."""
+        def _raw_to_stage_indices(raw_idx):
             if raw_idx is None:
                 return None
-            if self.active_indices is None:
-                raise RuntimeError(f"Frame {self.n}: active_indices not set; cannot map raw->active.")
             raw_idx = np.asarray(raw_idx, dtype=int).reshape(-1)
-            active_raw = np.asarray(self.active_indices, dtype=int).reshape(-1)
-
-            # raw->active lookup
-            lut = {int(r): i for i, r in enumerate(active_raw)}
-            mapped = [lut.get(int(r), -1) for r in raw_idx]
-            mapped = np.asarray([m for m in mapped if m >= 0], dtype=int)
+            mapped = self._map_raw_to_stage_indices(raw_idx, stage_raw_indices)
             return mapped if mapped.size > 0 else np.array([], dtype=int)
 
         retractor_idx = None
         epicardium_idx = None
 
         if retractor and self.retractor is not None and getattr(self.retractor, "subset_indices", None) is not None:
-            if index_space == "raw":
-                retractor_idx = np.asarray(self.retractor.subset_indices, dtype=int).reshape(-1)
-            else:
-                retractor_idx = _raw_to_active_indices(self.retractor.subset_indices)
+            retractor_idx = _raw_to_stage_indices(self.retractor.subset_indices)
 
         if epicardium and self.epicardium is not None and getattr(self.epicardium, "subset_indices", None) is not None:
-            if index_space == "raw":
-                epicardium_idx = np.asarray(self.epicardium.subset_indices, dtype=int).reshape(-1)
-            else:
-                epicardium_idx = _raw_to_active_indices(self.epicardium.subset_indices)
+            epicardium_idx = _raw_to_stage_indices(self.epicardium.subset_indices)
 
         subset_indices_dict = build_subset_indices_dict(
             retractor=retractor_idx,
@@ -376,7 +386,7 @@ class IOFrame(Frame):
                 )
 
         fig.update_layout(
-            title=f"Frame {self.n}  ({index_space}/{coord_space})"
+            title=f"Frame {self.n}  ({stage})"
         )
         fig.show()
 
@@ -527,5 +537,3 @@ class POFrame:
             gamma=gamma
         )
         napari.run()
-
-

@@ -49,12 +49,12 @@ def plot_frame_with_segments_3d(frame,
                                 show_retractor: bool = True,
                                 show_epicardium: bool = False,
                                 sample_every: int = 1,
+                                stage: str = "processed",
                                 title: str = "Frame (3D)") -> None:
     """
     Visualize a frame's point cloud and optionally highlight retractor/epicardium.
-    Uses original_points for now; call on registered_points if desired.
     """
-    pts = frame.original_points[::sample_every]
+    pts = frame.get_points(stage)[::sample_every]
 
     ax = _new_3d_ax(title=title)
 
@@ -62,14 +62,16 @@ def plot_frame_with_segments_3d(frame,
                s=0.5, c="lightgray", alpha=0.5, label="All points")
 
     if show_retractor and getattr(frame, "retractor", None) is not None:
-        idx = frame.retractor.indices
-        rpts = frame.original_points[idx]
+        idx = frame.retractor.subset_indices
+        stage_idx = frame.map_raw_indices_to_stage(idx, stage)
+        rpts = frame.get_points(stage)[stage_idx]
         ax.scatter(rpts[:, 0], rpts[:, 1], rpts[:, 2],
                    s=2.0, c="red", alpha=0.9, label="Retractor")
 
     if show_epicardium and getattr(frame, "epicardium", None) is not None:
-        idx = frame.epicardium.indices
-        epts = frame.original_points[idx]
+        idx = frame.epicardium.subset_indices
+        stage_idx = frame.map_raw_indices_to_stage(idx, stage)
+        epts = frame.get_points(stage)[stage_idx]
         ax.scatter(epts[:, 0], epts[:, 1], epts[:, 2],
                    s=1.5, c="blue", alpha=0.9, label="Epicardium")
 
@@ -295,8 +297,12 @@ def plot_two_registered_retractors(frame_a, frame_b, sample=1):
     idx0 = frame_a.retractor.subset_indices
     idx1 = frame_b.retractor.subset_indices
 
-    pts_a = frame_a.registered_points[idx0][::sample]
-    pts_b = frame_b.registered_points[idx1][::sample]
+    pts_a = frame_a.get_points("registered")
+    pts_b = frame_b.get_points("registered")
+    idx0_stage = frame_a.map_raw_indices_to_stage(idx0, "registered")
+    idx1_stage = frame_b.map_raw_indices_to_stage(idx1, "registered")
+    pts_a = pts_a[idx0_stage][::sample]
+    pts_b = pts_b[idx1_stage][::sample]
 
     fig = plt.figure(figsize=(7, 7))
     ax = fig.add_subplot(111, projection="3d")
@@ -315,4 +321,3 @@ def plot_two_registered_retractors(frame_a, frame_b, sample=1):
     ax.view_init(elev=30, azim=-60)
     plt.tight_layout()
     plt.show()
-

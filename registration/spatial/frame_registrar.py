@@ -1,7 +1,7 @@
 import numpy as np
 
 from registration.spatial.icp.icp import point_to_plane_icp
-from registration.spatial.transforms.transforms import MatrixStep, apply_T
+from registration.spatial.transforms.transforms import MatrixStep
 from registration.utilities.visualization import plot_two_registered_retractors
 
 
@@ -12,11 +12,11 @@ class FrameRegistrar:
     Modern design (Transforms-driven)
     ---------------------------------
     - No ORCoordinateGrid.
-    - OR space is defined as the output of stage="registration".
-    - The target_frame already has a registration MatrixStep that defines OR
+    - OR space is defined as the output of stage="registered".
+    - The target_frame already has a registered-stage MatrixStep that defines OR
       (typically from retractor alignment).
-    - For each other frame, we estimate a WORLD->OR transform via ICP and
-      record it as MatrixStep(stage="registration") on that frame.
+    - For each other frame, we estimate a PROCESSED->REGISTERED transform via ICP and
+      record it as MatrixStep(stage="registered") on that frame.
 
     Assumptions
     -----------
@@ -48,7 +48,7 @@ class FrameRegistrar:
     ### --- INTERNAL HELPERS --- ###
     def _require_target_registration_T(self):
         """
-        Returns the target frame's WORLD->OR transform from its transforms chain.
+        Returns the target frame's PROCESSED->REGISTERED transform from its transforms chain.
         """
         if self.target_frame is None:
             raise RuntimeError("FrameRegistrar.target_frame is None")
@@ -56,20 +56,24 @@ class FrameRegistrar:
         if getattr(self.target_frame, "transforms", None) is None:
             raise RuntimeError("Target frame has no transforms")
 
-        # Prefer your "property that returns only the transform"
-        if hasattr(self.target_frame.transforms, "collapsed_transform"):
-            T = self.target_frame.transforms.collapsed_transform()
-        else:
-            # Fallback: collapse by stage if available
-            if not hasattr(self.target_frame.transforms, "collapse"):
-                raise RuntimeError(
-                    "Target frame transforms missing collapsed_transform and collapse()"
-                )
-            T, _ = self.target_frame.transforms.collapse(stages=["registration"])
-
-        if T is None:
+        if not hasattr(self.target_frame.transforms, "collapse"):
             raise RuntimeError(
-                "Could not obtain target WORLD->OR transform (registration stage missing?)"
+                "Target frame transforms missing collapse()"
+            )
+
+        collapsed = self.target_frame.transforms.collapse(
+            stages=["registered"],
+            n_raw_points=len(self.target_frame.raw_points),
+        )
+        T = collapsed["collapsed_T"]
+
+        has_registration = any(
+            getattr(step, "kind", None) == "matrix" and getattr(step, "stage", None) == "registered"
+            for step in self.target_frame.transforms.steps
+        )
+        if not has_registration:
+            raise RuntimeError(
+                "Could not obtain target PROCESSED->REGISTERED transform (registration stage missing?)"
             )
 
         T = np.asarray(T, dtype=float)
@@ -99,24 +103,18 @@ class FrameRegistrar:
         idx = np.asarray(idx, dtype=int).reshape(-1)
         return idx
 
-    def _get_target_retractor_or(self):
+    def _get_target_retractor_registered(self):
         """
-        Return target retractor points expressed in OR coordinates.
+        Return target retractor points expressed in registered coordinates.
 
         Since target defines OR, we:
-          - take target retractor RAW points
-          - apply target registration transform (WORLD->OR)
+          - take target retractor RAW points (processed stage)
+          - apply target registration transform (processed->registered)
         """
-        if getattr(self.target_frame, "raw_points", None) is None:
-            raise RuntimeError("Target frame raw_points is None")
-
         idx = self._get_retractor_raw_indices(self.target_frame)
-        pts_world = self.target_frame.raw_points[idx]
-
-        T_or_from_world = self._require_target_registration_T()
-        pts_or = apply_T(T_or_from_world, pts_world)
-
-        return pts_or
+        pts_registered = self.target_frame.get_points("registered")
+        idx_registered = self.target_frame.map_raw_indices_to_stage(idx, "registered")
+        return pts_registered[idx_registered]
 
     ### --- PUBLIC API --- ###
     def register_all(self):
@@ -124,10 +122,10 @@ class FrameRegistrar:
         Register all frames (except target) into OR space via ICP.
 
         For each non-target frame:
-          - source = frame retractor points in WORLD (RAW points subset)
-          - target = target retractor points in OR
-          - ICP estimates T_or_from_world_for_frame
-          - record as MatrixStep(stage="registration") on the frame.transforms
+          - source = frame retractor points in PROCESSED space (RAW points subset)
+          - target = target retractor points in REGISTERED space
+          - ICP estimates T_registered_from_processed_for_frame
+          - record as MatrixStep(stage="registered") on the frame.transforms
           - store rmse in frame.quality_metrics["registration_rmse"]
         """
         if self.target_frame is None:
@@ -136,7 +134,7 @@ class FrameRegistrar:
         # Ensure target has registration defined
         _ = self._require_target_registration_T()
 
-        target_retractor_or = self._get_target_retractor_or()
+        target_retractor_registered = self._get_target_retractor_registered()
 
         for frame in self.frames:
             if frame is self.target_frame:
@@ -150,12 +148,14 @@ class FrameRegistrar:
                 raise RuntimeError(f"Frame {getattr(frame, 'n', '?')} has no transforms")
 
             idx = self._get_retractor_raw_indices(frame)
-            source_retractor_world = frame.raw_points[idx]
+            source_processed = frame.get_points("processed")
+            idx_processed = frame.map_raw_indices_to_stage(idx, "processed")
+            source_retractor_processed = source_processed[idx_processed]
 
-            # ICP estimates SOURCE(world) -> TARGET(or)
-            T_or_from_world, rmse, info = point_to_plane_icp(
-                source=source_retractor_world,
-                target=target_retractor_or,
+            # ICP estimates SOURCE(processed) -> TARGET(registered)
+            T_registered_from_processed, rmse, info = point_to_plane_icp(
+                source=source_retractor_processed,
+                target=target_retractor_registered,
                 max_correspondence_distance=self.max_correspondence_distance,
                 normal_radius=self.normal_radius,
                 max_iterations=self.max_iterations,
@@ -163,13 +163,13 @@ class FrameRegistrar:
 
             step = MatrixStep(
                 name="register/icp_to_or",
-                stage="registration",
-                T=T_or_from_world,
+                stage="registered",
+                T=T_registered_from_processed,
             )
             step.set_metadata(
                 description="Register frame into OR space using point-to-plane ICP on retractor points",
-                from_space="world",
-                to_space="or",
+                from_space="processed",
+                to_space="registered",
                 method="icp_point_to_plane",
                 params={
                     "max_correspondence_distance": float(self.max_correspondence_distance),
@@ -198,6 +198,7 @@ class FrameRegistrar:
             frame.quality_metrics["registration_rmse"] = float(rmse)
 
             frame.is_registered = True
+            frame.validate_points_consistency(strict=False)
 
         if self.visualize and len(self.frames) >= 2:
             plot_two_registered_retractors(self.frames[0], self.frames[1])

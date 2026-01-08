@@ -17,3 +17,5 @@ data_storage/
 
 # OS
 .DS_Store
+
+git_token.txt
