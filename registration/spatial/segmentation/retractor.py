@@ -108,8 +108,26 @@ def orient_plane_normals_up_from_center(planes, points):
         n = p["normal"]
         p0 = p["point"]
         d = float(np.dot(n, center - p0))
-        if d >= 0:
+        if d > 1e-6:
             p["normal"] = -n
+
+
+def _principal_axis_in_plane(points, normal):
+    """
+    Estimate the dominant in-plane axis using PCA on the projected points.
+    """
+    if points.shape[0] < 2:
+        return None
+
+    n = normalize_vec(normal)
+    centered = points - points.mean(axis=0)
+    projected = centered - np.outer(centered @ n, n)
+    _, _, vh = np.linalg.svd(projected, full_matrices=False)
+    axis = vh[0]
+    axis = axis - np.dot(axis, n) * n
+    if np.linalg.norm(axis) < 1e-8:
+        return None
+    return normalize_vec(axis)
 
 
 def build_retractor_frame_from_plane(points, indices, normal, point_on_plane):
@@ -124,23 +142,34 @@ def build_retractor_frame_from_plane(points, indices, normal, point_on_plane):
     """
     # Ensure normal points "up" away from COM (robust)
     center = center_of_mass(points)
-    if float(np.dot(normal, center - point_on_plane)) >= 0:
+    if float(np.dot(normal, center - point_on_plane)) > 1e-6:
         normal = -normal
 
-    # Build an orthonormal basis (u,v,n)
-    u, v, n = build_plane_basis(normal)
-
-    # Choose origin = centroid of inlier points projected onto plane basis (u,v)
+    # Build an orthonormal basis aligned with the retractor geometry
     pts = points[indices]
+    principal_axis = _principal_axis_in_plane(pts, normal)
+    if principal_axis is None:
+        u, v, n = build_plane_basis(normal)
+        x_axis = normalize_vec(u)
+        y_axis = normalize_vec(v)
+        z_axis = normalize_vec(n)
+    else:
+        z_axis = normalize_vec(normal)
+        x_axis = principal_axis - np.dot(principal_axis, z_axis) * z_axis
+        x_axis = normalize_vec(x_axis)
+        y_axis = normalize_vec(np.cross(z_axis, x_axis))
+        if np.linalg.norm(y_axis) < 1e-6:
+            u, v, n = build_plane_basis(normal)
+            x_axis = normalize_vec(u)
+            y_axis = normalize_vec(v)
+            z_axis = normalize_vec(n)
+
+    # Choose origin = centroid of inlier points projected onto plane basis (x,y)
     pts_rel = pts - point_on_plane
-    uv = np.stack([pts_rel @ u, pts_rel @ v], axis=1)
+    uv = np.stack([pts_rel @ x_axis, pts_rel @ y_axis], axis=1)
     uv_center = uv.mean(axis=0)
 
-    origin_world = point_on_plane + uv_center[0] * u + uv_center[1] * v
-
-    x_axis = normalize_vec(u)
-    y_axis = normalize_vec(v)
-    z_axis = normalize_vec(n)
+    origin_world = point_on_plane + uv_center[0] * x_axis + uv_center[1] * y_axis
 
     axes_world = {"x": x_axis, "y": y_axis, "z": z_axis}
 
