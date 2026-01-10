@@ -1,5 +1,6 @@
 from registration.spatial.load_io_data.io_frame import IOFrame
 from registration.spatial.load_io_data.preprocessing import *
+from registration.spatial.utilities.transforms_utils import apply_T
 
 import open3d as o3d
 import numpy as np
@@ -41,9 +42,17 @@ def load_io_data(env, data_dir=None):
         frame.preprocessing_pipeline.preprocess()
 
         frame.transforms = frame.preprocessing_pipeline.transforms
-        frame.active_indices = frame.preprocessing_pipeline.active_indices
-        frame.index_maps[("raw", "processed")] = frame.active_indices.copy()
-        frame.points = frame.preprocessing_pipeline.processed_points
+        collapsed = frame.transforms.collapse(
+            stages=["processed"],
+            n_raw_points=len(raw_points),
+        )
+        processed_indices = np.asarray(collapsed["collapsed_indices"], dtype=int).reshape(-1)
+        processed_T = np.asarray(collapsed["collapsed_T"], dtype=float)
+        processed_points = apply_T(raw_points[processed_indices], processed_T)
+
+        frame.active_indices = processed_indices
+        frame.index_maps[("raw", "processed")] = processed_indices.copy()
+        frame.points = processed_points
         frame.points_stage = "processed"
         frame.validate_points_consistency(strict=True)
 

@@ -1,9 +1,12 @@
 import numpy as np
+import math
 
 from registration.spatial.transforms.matrix import MatrixStep
 from registration.spatial.transforms.subset import SubsetStep
 from registration.spatial.transforms.annotation import AnnotationStep, SegmentationStep
-from registration.spatial.utilities.transforms_utils import compose_T, invert_T
+from registration.spatial.utilities.transforms_utils import compose_T, invert_T, apply_T
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 
 class Transforms:
@@ -81,6 +84,9 @@ class Transforms:
                 active = active[idx]
 
             elif kind == "matrix":
+                continue
+
+            elif kind == "segmentation":
                 continue
 
             else:
@@ -171,6 +177,3 @@ class Transforms:
             "or ensure at least one subset step in the selected range has "
             "metadata['previous_index_count'] set (typically the first processed subset)."
         )
-
-
-### --- HELPER FUNCTIONS --- ###
